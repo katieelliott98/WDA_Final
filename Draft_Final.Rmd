@@ -1,0 +1,481 @@
+---
+output: 
+  pdf_document: 
+    keep_tex: yes
+    fig_caption: yes
+    number_sections: yes
+    fig_width: 8
+    fig_height: 8
+geometry: margin=2.54cm
+title: "Groundwater Recharge and Quality Analysis"
+subtitle: "https://github.com/katieelliott98/WDA_Final.git"
+author: "Kaitlyn Elliott"
+fontsize: 12pt
+mainfont: Times New Roman
+---
+\newpage
+\tableofcontents
+\newpage
+
+# Rationale and Rearch Questions
+
+Knowing how precipitation affects groundwater levels is important for managing groundwater extraction, especially with climate change and changing rainfall distributions. Also knowing the likely quality of water for a given groundwater depth can help inform decision making. Given the importance of these factors, the focus of this projectn is to understand the lag time between precipitation, stormflow is used as a proxy, and groundwater levels. In reality this is trying to understand the recharge time of the groundwater aquifer. Two different sites will be analysed to see if there is a noticeable difference with different geologies. The first site is in Houserville, PA and is Pennsylvanian aquifer and the second is in Sewickley, PA and is a Valley and Ridge aquifer. The second main question investigated is how water quality of these aquifers has change overtime and how it changes with groundwater level. 
+
+The Main Questions Analyzed 
+
+1. How is groundwater levels and stormflow changing overtime? Is there seasonality?
+2. How does storm flow impact groundwater levels?
+3. How is groundwater quality changing overtime? Are chemicals more concentrated at low groundwater levels or high?
+
+
+
+\newpage
+
+# Dataset Information
+
+All data used in this project is from the USGS. Datasets were picked based on differing geology. First groundwater monitoring stations were selected that had both water level data and water quality data. Then the nearest stream gage with the most complete data was selected. Stream flow was separated with lfstat into baseflow and stormflow. Stormflow in this analysis is a proxy for precipitation because precipitation gage information was hard to find near groundwater monitoring stations. 
+
+
+Table 1. Data Information for Project
+
+Dataset  | Variable | Unit | Source
+---------|----------|------|--------
+Groundwater Level | Water Level | ft below surface | USGS
+Groundwater Quality | pH | Standard Units | USGS
+Gage Data | Discharge | ft^3/s | USGS
+All | Date | Y-m-d | USGS
+
+\newpage
+
+
+
+```{r set_up, message=FALSE, warning=FALSE, include=FALSE}
+getwd()
+
+library(tidyverse)
+library(lubridate)
+library(dataRetrieval)
+library(trend)
+library(cowplot)
+library(readr)
+library(zoo)
+library(Kendall)
+library(tseries)
+library(knitr)
+library(sf)
+library(lfstat)
+
+theme_set(theme_classic())
+options(scipen = 6)
+
+```
+
+
+```{r reading_data, message=FALSE, warning=FALSE, include=FALSE}
+#Water Quality Data
+
+#Houserville, PA
+Pennsylvania_aqu_qual<-read.csv("./Raw/pennylvania_aqu/QUALITY.csv")
+
+#Sewickley, PA
+Valley_Ridge_aqu_qual<- read.csv("./Raw/valley_ridge/QUALITY.csv")
+
+#Water Level Data
+
+
+Pennsylvania_aqu_WATERLEVEL<-read.csv("./Raw/pennylvania_aqu/WATERLEVEL.csv")
+
+
+Valley_Ridge_aqu_WATERLEVEL<- read.csv("./Raw/valley_ridge/WATERLEVEL.csv")
+
+#Streamflow/Precip data
+
+vr_gage_03086000 <-readNWISdata(siteNumbers = "03086000", parameterCd = "00060", startDate = "1968-01-01", endDate = "2021-12-31")
+
+penn_gage_01546400<-readNWISdata(siteNumbers = "01546400", parameterCd = "00060", startDate = "1987-10-01", endDate = "2021-11-30")
+ 
+
+```
+
+```{r data_wrangling, message=FALSE, warning=FALSE, include=FALSE}
+#Data Clean Up 
+
+#Ground Water Levels
+
+
+Pennsylvania_aqu_WATERLEVEL<-Pennsylvania_aqu_WATERLEVEL%>%
+  mutate(Date=as.Date(Time, format="%Y-%m-%d"), Water_Level=Original.Value)%>%
+  select(Date, Water_Level)%>%
+  filter(Date!="1967-06-01")%>%
+  drop_na(Water_Level)
+
+monthly_Pennsylvania_aqu_WATERLEVEL<-Pennsylvania_aqu_WATERLEVEL%>%
+  mutate(Month = month(Date), Year= year(Date))%>%
+  group_by(Month, Year)%>%
+  summarise(average_waterlevel=mean(Water_Level))%>%
+  mutate(day="01",date=as.Date(paste(Month, day, Year, sep = "-"),
+                               format="%m-%d-%Y"))
+
+write.csv(monthly_Pennsylvania_aqu_WATERLEVEL, row.names = FALSE, 
+          file ="./Processed/monthly_Pennsylvania_aqu_WATERLEVEL.csv")
+
+
+
+Valley_Ridge_aqu_WATERLEVEL<-Valley_Ridge_aqu_WATERLEVEL%>%
+  mutate(Date=as.Date(Time, format="%Y-%m-%d"), Water_Level=Original.Value)%>%
+  select(Date, Water_Level)%>%
+  filter(Date!="1967-01-18")%>%
+  complete(Date = seq.Date(min(Date), max(Date), by="day"))%>%
+  mutate(Water_Level=zoo::na.approx(Water_Level))
+  
+
+monthly_Valley_Ridge_aqu_WATERLEVEL<-Valley_Ridge_aqu_WATERLEVEL%>%
+  mutate(Month = month(Date), Year= year(Date))%>%
+  group_by(Month, Year)%>%
+  summarise(average_waterlevel=mean(Water_Level))%>%
+  mutate(day="01",date=as.Date(paste(Month, day, Year, sep = "-"),
+                               format="%m-%d-%Y"))
+
+write.csv(monthly_Valley_Ridge_aqu_WATERLEVEL, row.names = FALSE, file="./Processed/monthly_Valley_Ridge_aqu_WATERLEVEL.csv")
+
+#Ground Water Quality
+
+Pennsylvania_aqu_QUALITY<-Pennsylvania_aqu_qual%>%
+  mutate(Date=as.Date(ActivityStartDate, format="%Y-%m-%d"), Units=ResultMeasureUnitCode, Value=ResultMeasureValue, Water_Quality_Variable=CharacteristicName)%>%
+  select(Date, Value, ActivityStartTime, Water_Quality_Variable)%>%
+  group_by(Date, Water_Quality_Variable)%>%
+  summarise(mean_value=mean(Value))%>%
+  pivot_wider(names_from = Water_Quality_Variable, values_from = mean_value)
+ 
+write.csv(Pennsylvania_aqu_QUALITY, row.names = FALSE, file="./Processed/Pennsylvania_aqu_QUALITY.csv")  
+
+
+Valley_Ridge_aqu_QUALITY<-Valley_Ridge_aqu_qual%>%
+  mutate(Date=as.Date(ActivityStartDate, format="%Y-%m-%d"), Units=ResultMeasureUnitCode, Value=ResultMeasureValue, Water_Quality_Variable=CharacteristicName)%>%
+  select(Date, ActivityStartTime, Value, Water_Quality_Variable)%>%
+  group_by(Date, Water_Quality_Variable)%>%
+  summarise(mean_value=mean(Value))%>%
+  pivot_wider(names_from = Water_Quality_Variable, values_from = mean_value)
+
+write.csv(Valley_Ridge_aqu_QUALITY, row.names = FALSE, file="./Processed/Valley_Ridge_aqu_QUALITY.csv")
+
+#discharge 
+
+
+penn_gage_01546400<-penn_gage_01546400%>%
+  mutate(Discharge = X_00060_00003) %>%
+  select(Discharge, dateTime, site_no) %>%
+  mutate(Month = month(dateTime), Year= year(dateTime))%>%
+  mutate(Baseflow_lfstat = baseflow(Discharge),
+         Stormflow_lfstat = Discharge - Baseflow_lfstat)%>%
+    drop_na(Stormflow_lfstat)
+
+monthly_penn_gage_01546400<-penn_gage_01546400%>%
+  group_by(Month, Year)%>%
+  summarise(averagestormflow=mean(Stormflow_lfstat))%>%
+  mutate(day="01",date=as.Date(paste(Month, day, Year, sep = "-"),
+                               format="%m-%d-%Y"))
+
+
+write.csv(monthly_penn_gage_01546400, row.names = FALSE, file = "./Processed/monthly_penn_gage_01546400.csv")
+
+
+vr_gage_03086000<-vr_gage_03086000%>%
+  mutate(Discharge = X_00060_00003) %>%
+  select(Discharge, dateTime, site_no) %>%
+  mutate(Month = month(dateTime), Year= year(dateTime))%>%
+  mutate(Baseflow_lfstat = baseflow(Discharge),
+         Stormflow_lfstat = Discharge - Baseflow_lfstat)%>%
+    drop_na(Stormflow_lfstat)
+
+monthly_vr_gage_03086000<-vr_gage_03086000%>%
+  group_by(Month, Year)%>%
+  summarise(averagestormflow=mean(Stormflow_lfstat))%>%
+  mutate(day="01",date=as.Date(paste(Month, day, Year, sep = "-"),
+                               format="%m-%d-%Y"))
+
+
+write.csv(monthly_vr_gage_03086000, row.names = FALSE, file = "./Processed/monthly_vr_gage_03086000.csv")
+
+```
+
+# Exploratory Analysis 
+
+A line plot was created with ggplot to get a view of the data. Figure 1 shows data for Houserville, PA, which exhibits very clear seasonal patterns in the groundwater levels, and possibly seasonality for stormflow. Figure 2 demonstrates the data for Sewickley, PA, which has obvious seasonality in stormflow and is not clear on seasonality for groundwater levels. Neither dataset has obvious trends overtime for groundwater nor stormflow. Based on the exploratory analysis a good next step would be a seasonal Mann-Kenall test to see if there is a trend overtime and if there is strong statistical seasonality. 
+
+```{r explore, echo=FALSE, fig.height=10, fig.width=8, message=FALSE, warning=FALSE}
+#Investigative Plots
+
+explore_penn_1<-ggplot(Pennsylvania_aqu_WATERLEVEL, aes(y=Water_Level, x=Date))+geom_line()+ylab("Depth to Water Below Land Surface (ft)")+labs(title="Figure 1. Groundwater levels and Stormflow Over Time", subtitle="Houserville, PA")
+explore_penn_2<-ggplot(penn_gage_01546400, aes(x=dateTime, y=Stormflow_lfstat))+geom_line()+ylab(~"Stormflow Discharge"(ft^3/s))+xlab("Date")
+plot_grid(explore_penn_1, explore_penn_2, ncol = 1, align = "hv")
+
+
+explore_vr_1<-ggplot(Valley_Ridge_aqu_WATERLEVEL , aes(y=Water_Level, x=Date))+geom_line()+ylab("Depth to Water Below Land Surface (ft)")+labs(title="Figure 2. Groundwater levels and Stormflow Over Time", subtitle= "Sewickley, PA")
+explore_vr_2<-ggplot(vr_gage_03086000, aes(x=dateTime, y=Stormflow_lfstat))+geom_line()+ylab(~"Stormflow Discharge"(ft^3/s))+xlab("Date")
+plot_grid(explore_vr_1, explore_vr_2, ncol = 1, align = "hv" )
+
+
+
+```
+
+\newpage
+
+# Analysis
+
+## Question 1: How is groundwater levels and stormflow changing overtime? Is there seasonality?
+
+Seasonality was analyzed for both groundwater levels and stormflow by first aggregating the datasets into monthly data. Then they were transformed into time series and decomposed. The results of this can be seen in Figures 1234. Then a seasonal Mann-Kendall test was run based on the presence of seasonality. The results of these tests showed the overall trend overtime in both Houserville and Sewickley, PA for their groundwater levels and their stormflow. 
+
+
+### Decomposition and Trend Analysis for Houserville, PA: Stormflow
+
+There is a seasonal trend for stormflow in Houserville, PA. So the Mann-Kendall test was run producing a z value of -3.8953 and a p-value of 0.00009809. Meaning that it is statistically significant that stormflow is trending downward over time. 
+
+```{r seasonality, echo=FALSE, message=FALSE, warning=FALSE}
+penn_gage_ts<-ts(monthly_penn_gage_01546400[[3]], frequency = 12,  start = c(1987, 10), end = c(2021, 11))
+decom_penn_gage<-stl(penn_gage_ts, s.window = "periodic")
+plot(decom_penn_gage)
+components_penn_gage<-as.data.frame(decom_penn_gage$time.series[,1:3])%>%
+  mutate(averagestormflow=monthly_penn_gage_01546400$averagestormflow)%>%
+  mutate(non_seasonal=(averagestormflow-seasonal))%>%
+  mutate(date=monthly_penn_gage_01546400$date)
+trend_penn_gage<-smk.test(penn_gage_ts)
+trend_penn_gage
+summary(trend_penn_gage)
+
+```
+
+\newpage
+
+### Decomposition and Trend Analysis for Houserville, PA: Groundwater
+
+There is a seasonal trend for groundwater levels in Houserville, PA. So the Mann-Kendall test was run producing a z value of 9.4939 and a p-value of < 2.2e-16. Meaning that it is statistically significant that distance from the surface to the groundwater level is trending upward over time. This suggests ground water is decreasing over time.  
+
+```{r seasonality_2, echo=FALSE, message=FALSE, warning=FALSE}
+
+penn_aqu_ts<-ts(monthly_Pennsylvania_aqu_WATERLEVEL[[3]], frequency = 12,  start = c(1987, 10), end = c(2021, 11))
+decom_penn_aqu<-stl(penn_aqu_ts, s.window = "periodic")
+plot(decom_penn_aqu)
+components_penn_aqu<-as.data.frame(decom_penn_aqu$time.series[,1:3])%>%
+  mutate(waterlevel=monthly_Pennsylvania_aqu_WATERLEVEL$average_waterlevel)%>%
+  mutate(non_seasonal_aqu=(waterlevel-seasonal))%>%
+  mutate(date=monthly_Pennsylvania_aqu_WATERLEVEL$date)
+trend_penn_aqu<-smk.test(penn_aqu_ts)
+trend_penn_aqu
+summary(trend_penn_aqu)
+
+```
+
+\newpage
+
+### Decomposition and Trend Analysis for Sewickley, PA: Stormflow
+
+There is a seasonal trend for stormflow in Sweickley, PA. So the Mann-Kendall test was run producing a z value of -8.7502 and a p-value of < 2.2 e-16. Meaning that it is statistically significant that stormflow is trending downward over time. 
+
+```{r seasonality_3, echo=FALSE, message=FALSE, warning=FALSE}
+
+vr_gage_ts<-ts(monthly_vr_gage_03086000[[3]], frequency = 12,  start = c(1968, 01), end = c(2021, 12))
+decom_vr_gage<-stl(vr_gage_ts, s.window = "periodic")
+plot(decom_vr_gage)
+components_vr_gage<-as.data.frame(decom_vr_gage$time.series[,1:3])%>%
+  mutate(averagestormflow=monthly_vr_gage_03086000$averagestormflow)%>%
+  mutate(non_seasonal=(averagestormflow-seasonal))%>%
+  mutate(date=monthly_vr_gage_03086000$date)
+trend_vr_gage<-smk.test(vr_gage_ts)
+trend_vr_gage
+summary(trend_vr_gage)
+
+```
+
+\newpage
+
+### Decomposition and Trend Analysis for Sewickley, PA: Groundwater
+
+There is a seasonal trend for groundwater level in Sewickley, PA. So the Mann-Kendall test was run producing a z value of -0.56856 and a p-value of 0.5697. This means that there is no statistically significant trend over time. 
+
+```{r seasonality_4, echo=FALSE, message=FALSE, warning=FALSE}
+
+vr_aqu_ts<-ts(monthly_Valley_Ridge_aqu_WATERLEVEL[[3]], frequency = 12,  start = c(1968, 01), end = c(2021, 12))
+decom_vr_aqu<-stl(vr_aqu_ts, s.window = "periodic")
+plot(decom_vr_aqu)
+components_vr_aqu<-as.data.frame(decom_vr_aqu$time.series[,1:3])%>%
+  mutate(waterlevel=monthly_Valley_Ridge_aqu_WATERLEVEL$average_waterlevel)%>%
+  mutate(non_seasonal_aqu=(waterlevel-seasonal))%>%
+  mutate(date=monthly_Valley_Ridge_aqu_WATERLEVEL$date)
+trend_vr_aqu<-smk.test(vr_aqu_ts)
+trend_vr_aqu
+summary(trend_vr_aqu)
+
+
+
+```
+\newpage
+
+## Question 2: How does stormflow impact groundwater levels?
+
+To understand how stormflow impacts groundwater level the two datasets were combined by date to consildate the information. Stormflow and groundwater were plotting against each other to see if there was any correlation, as seen in Figure 3 and 6. A CCF (cross correlation function) was run to understand what lag leads to the best correlation between the two variables. This test was run for both sites and was run with and without seasonality included to see if there was a difference. The results of the CCF were fairly inconclusive given what researchers know about the relationship between groundwater and precipitation. CCF figures are 4, 5, 7, and 8. 
+
+```{r groundwater_lag, echo=FALSE, fig.height=8, fig.width=8, message=FALSE, warning=FALSE}
+
+ground_surface_penn<-left_join(monthly_Pennsylvania_aqu_WATERLEVEL, monthly_penn_gage_01546400)
+
+ggplot(ground_surface_penn, aes(x=averagestormflow, y=average_waterlevel))+geom_point()+xlab(~"Stormflow" (ft^3/s))+ylab("Depth to Water Below Land Surface (ft)")+labs(title="Figure 3. Scatter Plot of Stormflow and Groundwater Depth using Monthly Averages", subtitle= "Houserville, PA")+scale_y_reverse()
+
+components_penn_join<-left_join(components_penn_gage, components_penn_aqu, by="date")
+
+ccf_penn_season<-ccf(ground_surface_penn$averagestormflow, ground_surface_penn$average_waterlevel, plot=FALSE)
+plot(ccf_penn_season, main=c("Figure 4. Covarience of Average Stormflow and Groundwater Levels"," with Seasonality Included (Houserville, PA)"))
+
+#ccf_penn_season
+
+ccf_penn_nonseason<-ccf(components_penn_join$non_seasonal, components_penn_join$non_seasonal_aqu, plot=FALSE)
+plot(ccf_penn_nonseason, main=c("Figure 5. Covarience of Average Stormflow and Groundwater Levels"," Without Seasonality (Houserville, PA)"))
+
+#ccf_penn_nonseason
+
+
+
+
+
+
+ground_surface_vr<-left_join(monthly_Valley_Ridge_aqu_WATERLEVEL, monthly_vr_gage_03086000)
+
+ggplot(ground_surface_vr, aes(x=averagestormflow, y=average_waterlevel))+geom_point()+xlab(~"Stormflow" (ft^3/s))+ylab("Depth to Water Below Land Surface (ft)")+labs(title="Figure 6. Scatter Plot of Stormflow and Groundwater Depth using Monthly Averages", subtitle= "Sewickley, PA")+scale_y_reverse()
+
+components_vr_join<-left_join(components_penn_gage, components_vr_aqu, by="date")
+
+ccf_vr_season<-ccf(ground_surface_vr$averagestormflow, ground_surface_vr$average_waterlevel, plot=FALSE)
+#ccf_vr_season
+
+plot(ccf_vr_season, main=c("Figure 7. Covarience of Average Stormflow and Groundwater Levels"," with Seasonality Included (Sewickley, PA)"))
+
+ccf_vr_nonseason<-ccf(components_vr_join$non_seasonal, components_vr_join$non_seasonal_aqu, plot=FALSE)
+#ccf_vr_nonseason
+
+plot(ccf_vr_nonseason, main=c("Figure 8. Covarience of Average Stormflow and Groundwater Levels"," Without Seasonality (Sewickley, PA)"))
+
+
+#seasonality in lag?
+
+```
+\newpage
+
+## Question 3: How is groundwater quality changing overtime? Are chemicals more concentrated at low groundwater levels or high?
+
+Lastly, water quality was analyzed with visual plots and linear regression. Two of the many available water quality variables were chosen for analysis: sulfate concentrations and pH. Figures 9 and 10 show how sulfate changes over time and with groundwater depth for Houserville and Sewickley, PA, respectively. Figure 11 and 12 show how pH changes over time and with groundwater depth for Houserville and Sewickley, PA, respectively. Then a linear regression was also run for sulfate concentration and pH in relation to groundwater level and time for both sites to test for statistical significance. 
+
+
+
+```{r groundwater_quality, echo=FALSE, fig.height=10, fig.width=8, message=FALSE, warning=FALSE}
+
+groundwater_level_qual_penn<-left_join(Pennsylvania_aqu_QUALITY, Pennsylvania_aqu_WATERLEVEL)
+
+groundwater_level_qual_vr<-left_join(Valley_Ridge_aqu_QUALITY, Valley_Ridge_aqu_WATERLEVEL)
+
+penn_sulfate_1<-ggplot(groundwater_level_qual_penn, aes(x=Water_Level, y=Sulfate))+geom_point()+geom_smooth(method=lm)+xlab("Depth to Water Below Land Surface (ft)")+labs(title ="Figure 9. Sulfate Concentration Variations with Water Level and Time", subtitle ="Houserville, PA")+ylab("Sulfate (mg/l)")
+penn_sulfate_2<-ggplot(groundwater_level_qual_penn, aes(x=Date, y=Sulfate))+geom_point()+geom_smooth(method=lm)+ylab("Sulfate (mg/l)")
+plot_grid(penn_sulfate_1, penn_sulfate_2, ncol = 1, align="hv")
+
+```
+
+\newpage
+
+```{r linear_m1, echo=FALSE, message=FALSE, warning=FALSE}
+
+lm_penn_sulfate_waterlevel<-lm(data = groundwater_level_qual_penn, Sulfate ~ Water_Level)
+summary(lm_penn_sulfate_waterlevel)
+
+lm_penn_sulfate_Date<-lm(data = groundwater_level_qual_penn, Sulfate ~ Date)
+summary(lm_penn_sulfate_Date)
+
+```
+
+\newpage
+```{r linear_m2, echo=FALSE, message=FALSE, warning=FALSE}
+
+vr_sulfate_1<-ggplot(groundwater_level_qual_vr, aes(x=Water_Level, y=Sulfate))+geom_point()+geom_smooth(method=lm)+xlab("Depth to Water Below Land Surface (ft)")+labs(title="Figure 10. Sulfate Concentration Variations with Water Level and Time", subititle= "Sewickley, PA")+ylab("Sulfate (mg/l)")
+vr_sulfate_2<-ggplot(groundwater_level_qual_vr, aes(x=Date, y=Sulfate))+geom_point()+geom_smooth(method=lm)+ylab("Sulfate (mg/l)")
+plot_grid(vr_sulfate_1, vr_sulfate_2, ncol = 1, align="hv")
+
+```
+
+\newpage
+```{r linear_m3, echo=FALSE, message=FALSE, warning=FALSE}
+
+lm_vr_sulfate_waterlevel<-lm(data = groundwater_level_qual_vr, Sulfate ~ Water_Level)
+summary(lm_vr_sulfate_waterlevel)
+
+lm_vr_sulfate_Date<-lm(data = groundwater_level_qual_vr, Sulfate ~ Date)
+summary(lm_vr_sulfate_Date)
+
+```
+\newpage
+
+```{r linear_m4, echo=FALSE, message=FALSE, warning=FALSE}
+
+
+penn_ph_1<-ggplot(groundwater_level_qual_penn, aes(x=Water_Level, y=pH))+geom_point()+geom_smooth(method=lm)+xlab("Depth to Water Below Land Surface (ft)")+labs(title="Figure 11. pH Level Variations with Water Level and Time", subtitle= "Houserville, PA")
+penn_ph_2<-ggplot(groundwater_level_qual_penn, aes(x=Date, y=pH))+geom_point()+geom_smooth(method=lm)
+plot_grid(penn_ph_1, penn_ph_2, ncol = 1, align="hv")
+
+```
+
+\newpage
+
+```{r linear_m5, echo=FALSE, message=FALSE, warning=FALSE}
+
+lm_penn_ph_waterlevel<-lm(data = groundwater_level_qual_penn, pH ~ Water_Level)
+summary(lm_penn_ph_waterlevel)
+
+lm_penn_ph_Date<-lm(data = groundwater_level_qual_penn, pH ~ Date)
+summary(lm_penn_ph_Date)
+```
+
+\newpage
+```{r linear_m6, echo=FALSE, message=FALSE, warning=FALSE}
+
+vr_ph_1<-ggplot(groundwater_level_qual_vr, aes(x=Water_Level, y=pH))+geom_point()+geom_smooth(method=lm)+xlab("Depth to Water Below Land Surface (ft)")+labs(title="Figure 12. pH Level Variations with Water Level and Time", subtitle= "Sewickley, PA")
+vr_ph_2<-ggplot(groundwater_level_qual_vr, aes(x=Date, y=pH))+geom_point()+geom_smooth(method=lm)
+plot_grid(vr_ph_1, vr_ph_2, ncol = 1, align="hv")
+
+```
+
+\newpage
+```{r linear_m7, echo=FALSE, message=FALSE, warning=FALSE}
+lm_vr_ph_waterlevel<-lm(data = groundwater_level_qual_vr, pH ~ Water_Level)
+summary(lm_vr_ph_waterlevel)
+
+lm_vr_ph_Date<-lm(data = groundwater_level_qual_vr, pH ~ Date)
+summary(lm_vr_ph_Date)
+```
+\newpage
+
+
+# Summary and Conclusions
+
+## Question 1
+
+From the analysis, stormflow and groundwater have seasonal trends in both Houserville and Sewickley, PA. Given this, a seasonal Mann-Kendall test was run to understand how these variables were changing over time. In Houserville, stormflow was showing statistical significance for decreasing over time, while groundwater levels were also decreasing overtime. In Sewickley, stormflow was showing statistical significance for decreasing over time, while groundwater levels showed no statistical significance in trend over time. 
+
+
+
+## Question 2
+
+Precipitation or in the case of this analysis stormflow should be an indicator of groundwater levels because groundwater is recharged by precipitation. In this analysis because groundwater levels are measured as distance from the ground surface to the water level, the larger the water level value the less ground water there is. As a result the relationship for this data is the less stormwater or precipitation there is the greater the distance is to the water level. When looking at lag times in Houserville both with and without seasonality there was statistically significant and most dominant lag was at 0, -21 months. This means that according to the analysis ground water could be affected by rainfall within the month or take around 21 months to affect groundwater levels. For Sewickley there was statistically significant and most dominant lag at -2 months. This means it takes stormflow or precip around 2 months to affect groundwater levels. Positively correlated lag was not considered because that relationship does not line up scientifically. There is also the possibility that lag could be seasonal. For example, it could be that as the land is wetter it takes less time for groundwater to be affected by precipitation. 
+
+
+
+## Question 3
+
+Lastly, although must of the data was concentrated on recent samples the most statistically significant finding was that sulfate concentrations are higher in Sewickley now than before. There is also some evidence in both Houserville and Sewickley that sulfate concentrations increase as depth to water below the surface increases. This may suggest that sulfates are not being flushed out of the system with the water. Most of the analysis of groundwater quality were statistically insignificant. More consistent data sampling would be needed to form conclusions.
+
+
+\newpage
+
+# References
+
+https://cida.usgs.gov/ngwmn/index.jsp
+
+U.S. Geological Survey, 2016, National Water Information System data available on the World Wide Web (USGS Water Data for the Nation).
+

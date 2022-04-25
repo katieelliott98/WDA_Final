@@ -1,0 +1,7 @@
+"AgencyCd","SiteNo","LithologyID","LithologyDescription","LithologyControlledConcept","Lang","Uom","LithologyDepthFrom","LithologyDepthFromUnit","LithologyDepthTo","LithologyDepthToUnit"
+"NCDWR","Q32D1","NCDWR.Q32D1.LITH.1","Surficial Aquifer","","eng","ft","0","feet","14","feet"
+"NCDWR","Q32D1","NCDWR.Q32D1.LITH.2","Black Creek CU","","eng","ft","14","feet","36","feet"
+"NCDWR","Q32D1","NCDWR.Q32D1.LITH.3","Black Creek Aquifer","","eng","ft","36","feet","71","feet"
+"NCDWR","Q32D1","NCDWR.Q32D1.LITH.4","Upper Cape Fear CU","","eng","ft","71","feet","107","feet"
+"NCDWR","Q32D1","NCDWR.Q32D1.LITH.5","Upper Cape Fear Aquifer","","eng","ft","107","feet","204","feet"
+"NCDWR","Q32D1","NCDWR.Q32D1.LITH.6","Basement rock Aquifer","","eng","ft","204","feet","228","feet"
